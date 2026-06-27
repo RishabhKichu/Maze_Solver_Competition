@@ -1,0 +1,111 @@
+#ifndef HTML_H
+#define HTML_H
+
+#include <Arduino.h>
+const char html[] PROGMEM = R"=====(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MazeBot</title>
+  <style>
+    body { font-family: sans-serif; background: #f0f0f0; padding: 10px; font-size: 14px; }
+    .wrap { display: flex; flex-wrap: wrap; gap: 10px; }
+    .card { background: #fff; padding: 10px; border-radius: 4px; min-width: 250px; flex: 1; }
+    .sect { margin: 5px 0; padding: 5px; border-left: 3px solid #4CAF50; }
+    .row { display: flex; justify-content: space-between; margin: 3px 0; }
+    input[type=number] { width: 60px; }
+    .btn { width: 100%; background: #4CAF50; color: #fff; border: 0; padding: 5px; cursor: pointer; }
+    /* Ultra-lightweight raw text log */
+    #log { width: 100%; height: 60px; font-family: monospace; font-size: 11px; margin-top: 10px; display: block; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <h3>MazeBot</h3>
+  <div class="wrap">
+    <div class="card">
+      <h4>Sensors</h4>
+      <p>L: <strong id="s_l">0</strong> | C: <strong id="s_c">0</strong> | R: <strong id="s_r">0</strong></p>
+      <p>Enc Err: <strong id="s_enc_e">0</strong></p>
+      <p>PWM Err: <strong id="s_e1">0</strong></p>
+      <p>ToF Err: <strong id="s_e2">0</strong></p>
+    </div>
+    <div class="card">
+      <form id="f">
+        <div class="sect">
+          Spd: <input type="number" name="base_speed" min="0" max="255" value="100">
+        </div>
+        <div class="sect">
+          <strong>Enc PID</strong>
+          <div class="row">P:<input type="number" name="enc_kp" step="0.01" value="8.00"></div>
+          <div class="row">D:<input type="number" name="enc_kd" step="0.01" value="0.00"></div>
+          <div class="row">I:<input type="number" name="enc_ki" step="0.01" value="0.00"></div>
+        </div>
+        <div class="sect">
+          <strong>ToF PID</strong>
+          <div class="row">P:<input type="number" name="tof_kp" step="0.01" value="0.00"></div>
+          <div class="row">D:<input type="number" name="tof_kd" step="0.01" value="0.00"></div>
+          <div class="row">I:<input type="number" name="tof_ki" step="0.01" value="0.00"></div>
+        </div>
+        <input type="submit" class="btn" value="Update">
+        <span id="msg" style="color:green; font-size:12px;"></span>
+        <button type="button" class="btn" style="background:#e53935; margin-top:5px;" onclick="stop()">STOP</button>
+        <span id="msg" style="color:green; font-size:12px;"></span>
+      </form>
+    </div>
+  </div>
+
+  <textarea id="log" readonly>Awaiting logs...</textarea>
+
+  <script>
+    let lastLog = "";
+    setInterval(() => {
+      fetch('/d')
+        .then(r => r.text())
+        .then(t => {
+          const d = t.split(',');
+          if(d.length >= 6) {
+            document.getElementById('s_l').innerText = d[0];
+            document.getElementById('s_c').innerText = d[1];
+            document.getElementById('s_r').innerText = d[2];
+            document.getElementById('s_enc_e').innerText = d[3];
+            document.getElementById('s_e1').innerText = d[4];
+            document.getElementById('s_e2').innerText = d[5];
+            
+            // Appends 7th value if it exists and changed
+            if(d.length >= 7 && d[6].trim() !== "" && d[6] !== lastLog) {
+              lastLog = d[6];
+              const l = document.getElementById('log');
+              l.value += "\n" + lastLog;
+              l.scrollTop = l.scrollHeight; 
+            }
+          }
+        }).catch(()=>{});
+    }, 100);
+
+    document.getElementById('f').addEventListener('submit', function(e) {
+      e.preventDefault();
+      fetch('/updatePID', { method: 'POST', body: new URLSearchParams(new FormData(this)) })
+        .then(r => r.text())
+        .then(t => {
+          const m = document.getElementById('msg');
+          m.innerText = " OK";
+          setTimeout(() => m.innerText = "", 1500);
+        });
+    });
+    function stop() {
+    fetch('/updatePID', { method: 'POST', body: new URLSearchParams({base_speed: 0}) })
+        .then(r => r.text())
+        .then(() => {
+            document.querySelector('input[name=base_speed]').value = 0;
+            const m = document.getElementById('msg');
+            m.innerText = " STOPPED";
+            setTimeout(() => m.innerText = "", 1500);
+        });
+}
+  </script>
+</body>
+</html>
+)=====";
+
+#endif
