@@ -187,18 +187,15 @@ void handleNotFound() {
 }
 
 void setID(){
-  // 1. Reset both sensors by pulling XSHUT low
   pinMode(XSHUT_L, OUTPUT);
   pinMode(XSHUT_R, OUTPUT);
   digitalWrite(XSHUT_L, LOW);
   digitalWrite(XSHUT_R, LOW);
   delay(10);
 
-  // 2. Un-reset Sensor 1 (keep Sensor 2 in reset)
   pinMode(XSHUT_L, INPUT);
   delay(10);
 
-  // Initialize Sensor 1 and change its address
   if (!loxL.begin(LOX1_ADDRESS, true, &Wire, Adafruit_VL53L0X::VL53L0X_SENSE_HIGH_SPEED)) {
     Serial.println("Failed to boot first VL53L0X");
     while (1);
@@ -207,11 +204,9 @@ void setID(){
   }
   delay(10);
 
-  // 3. Un-reset Sensor 2
   pinMode(XSHUT_R, INPUT);
   delay(10);
 
-  // Initialize Sensor 2 and change its address
   if (!loxR.begin(LOX2_ADDRESS, true, &Wire, Adafruit_VL53L0X::VL53L0X_SENSE_HIGH_SPEED)) {
     Serial.println("Failed to boot second VL53L0X");
     while (1);
@@ -245,9 +240,8 @@ void tofPID() {
 
 void readTOF(){
   if(loxL.isRangeComplete() && loxR.isRangeComplete()) {
-    left_distance = updateKalman(kfLeft, loxL.readRange());
-    right_distance = updateKalman(kfRight, loxR.readRange());
-    // Serial.println("old=" + String(left_distance) + " new=" + String(updateKalman(kfLeft, left_distance)));
+    left_distance = constrain(updateKalman(kfLeft, loxL.readRange()), 0, 100);
+    right_distance = constrain(updateKalman(kfRight, loxR.readRange()), 0, 100);
   }
 }
 
