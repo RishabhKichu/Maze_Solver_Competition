@@ -21,6 +21,7 @@ String getResetReason(RESET_REASON reason) {
 const char* ssid = "MazeBot";
 const char* pass = "mazebot123";
 
+
 volatile float left_distance = 0; 
 volatile float center_distance = 0;
 volatile float right_distance = 0;
