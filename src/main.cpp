@@ -97,6 +97,7 @@ const int sda = 21;
 // XSHUT PINS
 const int XSHUT_L = 25;   
 const int XSHUT_R = 26;
+const int XSHUT_C = 4;
 
 const int freq = 5000;
 const int ledcChannelL = 0;
@@ -107,10 +108,12 @@ const int resolution = 8;
 // Define unique I2C addresses for each sensor
 #define LOX1_ADDRESS 0x30
 #define LOX2_ADDRESS 0x31
+#define LOX3_ADDRESS 0x29
 
 // Create sensor instances
 Adafruit_VL53L0X loxL = Adafruit_VL53L0X();
 Adafruit_VL53L0X loxR = Adafruit_VL53L0X();
+Adafruit_VL53L0X loxC = Adafruit_VL53L0X();
 
 TaskHandle_t sensorTaskHandle;
 TaskHandle_t controlTaskHandle;
@@ -138,6 +141,7 @@ struct KalmanFilter {
 // Initialize filters for left and right sensors
 KalmanFilter kfLeft;
 KalmanFilter kfRight;
+KalmanFilter kfCenter;
 
 // Function to update the Kalman filter with a new raw measurement
 float updateKalman(KalmanFilter &kf, float measurement) {
@@ -230,8 +234,10 @@ void handleNotFound() {
 void setID(){
   pinMode(XSHUT_L, OUTPUT);
   pinMode(XSHUT_R, OUTPUT);
+  pinMode(XSHUT_C, OUTPUT);
   digitalWrite(XSHUT_L, LOW);
   digitalWrite(XSHUT_R, LOW);
+  digitalWrite(XSHUT_C, LOW);
   delay(10);
 
   pinMode(XSHUT_L, INPUT);
@@ -254,8 +260,19 @@ void setID(){
   } else {
     Serial.println("Second VL53L0X initialized successfully");
   }
+
+  pinMode(XSHUT_C, INPUT);
+  delay(10);
+
+  if (!loxC.begin(LOX3_ADDRESS, true, &Wire, Adafruit_VL53L0X::VL53L0X_SENSE_HIGH_SPEED)) {
+    Serial.println("Failed to boot second VL53L0X");
+    while (1);
+  } else {
+    Serial.println("Third VL53L0X initialized successfully");
+  }
   loxL.startRangeContinuous();
   loxR.startRangeContinuous();
+  loxC.startRangeContinuous();
   sensorsReady = true;
 
 }
@@ -301,6 +318,7 @@ void readTOF(){
   if(loxL.isRangeComplete() && loxR.isRangeComplete()) {
     left_distance = constrain(updateKalman(kfLeft, loxL.readRangeResult()), 0, 1000);
     right_distance = constrain(updateKalman(kfRight, loxR.readRangeResult()), 0, 1000);
+    center_distance = constrain(updateKalman(kfCenter, loxC.readRangeResult()), 0, 1000);
   } 
 }
 
@@ -393,7 +411,6 @@ void taskControlCore(void* pvParameters){
   }    
     }
 }
-
 
 void setup() {
     Serial.begin(115200);
