@@ -7,68 +7,64 @@ const char html[] PROGMEM = R"=====(
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MazeBot </title>
+  <title>MazeBot</title>
   <style>
-    body { font-family: sans-serif; text-align: center; margin: 0; padding: 15px; background: #f0f0f0; color: #333; }
-    .wrap { display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; max-width: 800px; margin: 0 auto; }
-    .card { flex: 1; min-width: 280px; background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .sect { background: #f9f9f9; margin: 10px 0; padding: 10px; border-radius: 4px; border-left: 4px solid #4CAF50; text-align: left; }
-    h2, h4 { margin: 5px 0; }
-    .row { margin: 6px 0; display: flex; justify-content: space-between; align-items: center; }
-    input[type=number] { padding: 4px; width: 70px; border: 1px solid #ccc; border-radius: 4px; }
-    .btn { padding: 8px; background: #4CAF50; color: #fff; border: none; border-radius: 4px; cursor: pointer; width: 100%; font-weight: bold; }
-    .btn:hover { background: #45a049; }
-    #msg { margin-top: 5px; font-size: 0.9em; color: #4CAF50; font-weight: bold; }
+    body { font-family: sans-serif; background: #f0f0f0; padding: 10px; font-size: 14px; }
+    .wrap { display: flex; flex-wrap: wrap; gap: 10px; }
+    .card { background: #fff; padding: 10px; border-radius: 4px; min-width: 250px; flex: 1; }
+    .sect { margin: 5px 0; padding: 5px; border-left: 3px solid #4CAF50; }
+    .row { display: flex; justify-content: space-between; margin: 3px 0; }
+    input[type=number] { width: 60px; }
+    .btn { width: 100%; background: #4CAF50; color: #fff; border: 0; padding: 5px; cursor: pointer; }
+    /* Ultra-lightweight raw text log */
+    #log { width: 100%; height: 60px; font-family: monospace; font-size: 11px; margin-top: 10px; display: block; box-sizing: border-box; }
   </style>
 </head>
 <body>
-
-  <h2>MazeBot Dashboard</h2>
+  <h3>MazeBot</h3>
   <div class="wrap">
-    
     <div class="card">
-      <h2>Sensors</h2>
-      <div style="text-align: left; padding: 5px; font-size: 1.1em;">
-        <p>Left ToF: <strong id="s_l">0</strong> mm</p>
-        <p>Center ToF: <strong id="s_c">0</strong> mm</p>
-        <p>Right ToF: <strong id="s_r">0</strong> mm</p>
-        <p>Encoder Error: <strong id="s_enc_e">0</strong></p>
-        <p>PWM Error: <strong id="s_e1">0</strong></p>
-        <p>Tof Error: <strong id="s_e2">0</strong></p>
-      </div>
+      <h4>Sensors</h4>
+      <p>L: <strong id="s_l">0</strong> | C: <strong id="s_c">0</strong> | R: <strong id="s_r">0</strong></p>
+      <p>Enc Err: <strong id="s_enc_e">0</strong></p>
+      <p>PWM Err: <strong id="s_e1">0</strong></p>
+      <p>ToF Err: <strong id="s_e2">0</strong></p>
     </div>
-    
     <div class="card">
-      <h2>Control</h2>
       <form id="f">
-        
         <div class="sect">
-          <h4>Configuration</h4>
-          <div class="row"><label>Base Speed:</label><input type="number" name="base_speed" min="0" max="255" step="1" value="100"></div>
+          Spd: <input type="number" name="base_speed" min="0" max="255" value="100">
         </div>
+        <div class="sect">
+          <strong>Enc PID</strong>
+          <div class="row">P:<input type="number" name="enc_kp" step="0.01" value="8.00"></div>
+          <div class="row">D:<input type="number" name="enc_kd" step="0.01" value="0.00"></div>
+          <div class="row">I:<input type="number" name="enc_ki" step="0.01" value="0.00"></div>
+        </div>
+        <div class="sect">
+          <strong>ToF PID</strong>
+          <div class="row">P:<input type="number" name="tof_kp" step="0.01" value="0.00"></div>
+          <div class="row">D:<input type="number" name="tof_kd" step="0.01" value="0.00"></div>
+          <div class="row">I:<input type="number" name="tof_ki" step="0.01" value="0.00"></div>
+        </div>
+        <input type="submit" class="btn" value="Update">
+        <span id="msg" style="color:green; font-size:12px;"></span>
+        <button type="button" class="btn" style="background:#e53935; margin-top:5px;" onclick="cmd('stop')">STOP</button>
+        <button type="button" class="btn" style="background:#2E7D32; margin-top:5px;" onclick="cmd('follow')">FOLLOW</button>
+        <button type="button" class="btn" style="background:#1565C0; margin-top:5px;" onclick="cmd('turn')">TURN</button>
 
-        <div class="sect">
-          <h4>Encoder PID</h4>
-          <div class="row"><label>Kp:</label><input type="number" name="enc_kp" step="0.01" value="8.00"></div>
-          <div class="row"><label>Kd:</label><input type="number" name="enc_kd" step="0.01" value="0.00"></div>
-          <div class="row"><label>Ki:</label><input type="number" name="enc_ki" step="0.01" value="0.00"></div>
+        <div style="margin-top:8px; display:flex; gap:5px; align-items:center;">
+            <input type="number" id="pulses" value="5" min="1" style="width:60px;">
+            <button type="button" class="btn" style="width:auto; padding:5px 10px;" onclick="setPulses()">Set Pulses</button>
         </div>
-        
-        <div class="sect">
-          <h4>ToF PID</h4>
-          <div class="row"><label>Kp:</label><input type="number" name="tof_kp" step="0.01" value="0.00"></div>
-          <div class="row"><label>Kd:</label><input type="number" name="tof_kd" step="0.01" value="0.00"></div>
-          <div class="row"><label>Ki:</label><input type="number" name="tof_ki" step="0.01" value="0.00"></div>
-        </div>
-        
-        <input type="submit" class="btn" value="Update Parameters">
-        <div id="msg"></div>
       </form>
     </div>
-
   </div>
 
+  <textarea id="log" readonly>Awaiting logs...</textarea>
+
   <script>
+    let lastLog = "";
     setInterval(() => {
       fetch('/d')
         .then(r => r.text())
@@ -81,6 +77,14 @@ const char html[] PROGMEM = R"=====(
             document.getElementById('s_enc_e').innerText = d[3];
             document.getElementById('s_e1').innerText = d[4];
             document.getElementById('s_e2').innerText = d[5];
+            
+            // Appends 7th value if it exists and changed
+            if(d.length >= 7 && d[6].trim() !== "" && d[6] !== lastLog) {
+              lastLog = d[6];
+              const l = document.getElementById('log');
+              l.value += "\n" + lastLog;
+              l.scrollTop = l.scrollHeight; 
+            }
           }
         }).catch(()=>{});
     }, 100);
@@ -91,12 +95,32 @@ const char html[] PROGMEM = R"=====(
         .then(r => r.text())
         .then(t => {
           const m = document.getElementById('msg');
-          m.innerText = t;
-          setTimeout(() => m.innerText = "", 2000);
+          m.innerText = " OK";
+          setTimeout(() => m.innerText = "", 1500);
         });
     });
-  </script>
+    function cmd(action) {
+    fetch('/' + action)
+        .then(r => r.text())
+        .then(t => {
+            const m = document.getElementById('msg');
+            m.innerText = t;
+            setTimeout(() => m.innerText = '', 1500);
+        });
+    }
 
+    function setPulses() {
+        const v = document.getElementById('pulses').value;
+        fetch('/setPulses?v=' + v)
+            .then(r => r.text())
+            .then(t => {
+                const m = document.getElementById('msg');
+                m.innerText = t;
+                setTimeout(() => m.innerText = '', 1500);
+            });
+    }
+    
+  </script>
 </body>
 </html>
 )=====";
