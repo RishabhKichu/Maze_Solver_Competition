@@ -23,7 +23,7 @@ const char* pass = "mazebot123";
 
 
 volatile float left_distance = 0; 
-volatile float center_distance = 0;
+volatile float center_distance = 100;
 volatile float right_distance = 0;
 volatile float enc_error = 0;
 float tof_error = 0;
@@ -40,7 +40,22 @@ float tof_kd = 45;
 float tof_ki = 0;
 
 int baseSpeed = 230;
+float braking_threshold = 350;
+float turning_threshold = 200;
 
+int turnStartEncL = 0;
+int turnStartEncR = 0;
+int turnStartDiff = 0;
+bool turnDirectionRight = false;
+int TURN_PULSES = 380;
+
+enum RobotState {
+    STOP,
+    FOLLOW,
+    TURN
+};
+
+RobotState robot_state;
 WebServer server(80);
 
 int x = 0;
@@ -106,6 +121,10 @@ String current_log = "Booting...";
 
 bool sensorsReady = false;
 
+int decel = 0;
+unsigned int last_decel_time =0;
+int min_speed = 120;
+int turn_speed = 180;
 
 // Structure to hold Kalman filter states
 struct KalmanFilter {
@@ -170,14 +189,38 @@ void setupAP(){
     server.on("/updatePID", HTTP_POST, FormHandler);
     server.on("/d", HTTP_GET, []() {
         String data = String(left_distance, 1) + "," + 
-                     String(center_distance, 1) + "," + 
-                     String(right_distance, 1) + "," + 
-                     String(enc_error, 1) + "," + 
-                     String(pwmerror, 1) + "," + 
-                     String(tof_error, 1) + "," +
-                     current_log;
+                    String(center_distance, 1) + "," + 
+                    String(right_distance, 1) + "," + 
+                    String(enc_error, 1) + "," + 
+                    String(pwmerror, 1) + "," + 
+                    String(tof_error, 1) + "," +
+                    current_log + " L:" + String(encCountL) + " R:" + String(encCountR);
         server.send(200, "text/plain", data);
     });
+    server.on("/stop", HTTP_GET, []() {
+    robot_state = STOP;
+    server.send(200, "text/plain", "Stopped");
+    });
+
+    server.on("/follow", HTTP_GET, []() {
+    robot_state = FOLLOW;
+    server.send(200, "text/plain", "Following");
+    });
+    
+    server.on("/turn", HTTP_GET, []() {
+    robot_state = TURN;
+    server.send(200, "text/plain", "Turning");
+    });
+
+    server.on("/setPulses", HTTP_GET, []() {
+    if(server.hasArg("v")) {
+        TURN_PULSES = server.arg("v").toInt();
+        server.send(200, "text/plain", "Pulses set to " + String(TURN_PULSES));
+    } else {
+        server.send(400, "text/plain", "Missing ?v=");
+    }
+    });
+
     server.begin();
     Serial.println("HTTP server started");
 }
@@ -219,13 +262,22 @@ void setID(){
 
 }
 
-void EncoderPID(){
-    enc_error = encCountL - encCountR;
+void EncoderPID(int startErr){
+    enc_error = encCountL - encCountR - startErr;
     float delta = enc_error - last_enc_error;
     
     pwmerror = (enc_kp * enc_error) + (enc_kd * delta);
 
     last_enc_error = enc_error;
+
+    int leftMotorSpeed = baseSpeed - pwmerror;
+    int rightMotorSpeed = baseSpeed + pwmerror;
+
+    leftMotorSpeed = constrain(leftMotorSpeed, 0, 255);
+    rightMotorSpeed = constrain(rightMotorSpeed, 0, 255);
+
+    ledcWrite(ledcChannelL, leftMotorSpeed);
+    ledcWrite(ledcChannelR, rightMotorSpeed);
 }
 
 void tofPID() {
@@ -236,19 +288,75 @@ void tofPID() {
 
     pwmerror = (tof_kp * tof_error) + (tof_kd * delta);
     last_tof_error = tof_error;
+
+    int leftMotorSpeed = baseSpeed - pwmerror;
+    int rightMotorSpeed = baseSpeed + pwmerror;
+
+    leftMotorSpeed = constrain(leftMotorSpeed, 0, 255);
+    rightMotorSpeed = constrain(rightMotorSpeed, 0, 255);
+
+    ledcWrite(ledcChannelL, leftMotorSpeed);
+    ledcWrite(ledcChannelR, rightMotorSpeed);
 }
 
 void readTOF(){
   if(loxL.isRangeComplete() && loxR.isRangeComplete()) {
-    left_distance = constrain(updateKalman(kfLeft, loxL.readRange()), 0, 100);
-    right_distance = constrain(updateKalman(kfRight, loxR.readRange()), 0, 100);
-  }
+    left_distance = constrain(updateKalman(kfLeft, loxL.readRangeResult()), 0, 1000);
+    right_distance = constrain(updateKalman(kfRight, loxR.readRangeResult()), 0, 1000);
+    Serial.println(left_distance);
+    Serial.println(right_distance);
+    // loxL.startRangeContinuous();
+    // loxR.startRangeContinuous();
+  } 
 }
 
 void loop() {
 
 }
 
+void Turning_Logic(){
+    // if (center_distance>turning_threshold) {
+    //     if (baseSpeed>min_speed) {
+    //         baseSpeed -= decel*(micros() - last_decel_time)* 1e-6;
+    //     }
+    //     digitalWrite(L1, HIGH);
+    //     digitalWrite(L2, LOW);
+    //     digitalWrite(R1, LOW); 
+    //     digitalWrite(R2, HIGH);
+    //     tofPID();
+    // } else {
+        static bool turnInitialized = false;
+        if(!turnInitialized) {
+            turnStartEncL = encCountL;
+            turnStartEncR = encCountR;
+            turnStartDiff = encCountL - encCountR;  
+            last_enc_error = turnStartDiff;
+            // turnDirectionRight = (right_distance > left_distance); 
+            turnDirectionRight = false;
+            turnInitialized  = true;
+        }
+
+        int travelledL = encCountL - turnStartEncL;
+        int travelledR = encCountR - turnStartEncR;
+        
+        if(turnDirectionRight){
+            digitalWrite(L1, HIGH); digitalWrite(L2, LOW);  
+            digitalWrite(R1, HIGH); digitalWrite(R2, LOW);   
+            baseSpeed=turn_speed;
+            EncoderPID(turnStartDiff);
+        }else {
+            digitalWrite(L1, LOW);  digitalWrite(L2, HIGH);  
+            digitalWrite(R1, LOW);  digitalWrite(R2, HIGH);  
+            baseSpeed=turn_speed;
+            EncoderPID(turnStartDiff);
+        }
+
+        if(travelledL >= TURN_PULSES && travelledR >= TURN_PULSES) {
+            turnInitialized = false; 
+            robot_state = STOP;
+        }
+    // }
+}
 
 void taskSensorCore(void* pvParameters){
     setID();
@@ -258,7 +366,6 @@ void taskSensorCore(void* pvParameters){
         readTOF();
         server.handleClient();
         vTaskDelay(pdMS_TO_TICKS(5));
-
       }
 }
 
@@ -268,34 +375,35 @@ void taskControlCore(void* pvParameters){
 }
     const TickType_t xFrequency = pdMS_TO_TICKS(1000 / CONTROL_HZ);
     TickType_t xLastWakeTime = xTaskGetTickCount();
-    for(;;) {
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
-        unsigned long loopStart = micros();
 
+    robot_state = STOP;
+    for(;;) {
+      vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    //   if(robot_state!=TURN && center_distance<braking_threshold){
+    //     robot_state = TURN;
+    //     last_decel_time = micros();
+    //   }
+      switch(robot_state){
+        case FOLLOW:
+            baseSpeed=230;
             digitalWrite(L1, HIGH);
             digitalWrite(L2, LOW);
             digitalWrite(R1, LOW); 
             digitalWrite(R2, HIGH);
-            // EncoderPID();
             tofPID();
+            break;
+        case TURN:
+            Turning_Logic();
+            break;
+        case STOP:
+            ledcWrite(ledcChannelL, 0);
+            ledcWrite(ledcChannelR, 0);
+            break;
+        
+        
 
-            int leftMotorSpeed = baseSpeed - pwmerror;
-            int rightMotorSpeed = baseSpeed + pwmerror;
-
-            leftMotorSpeed = constrain(leftMotorSpeed, 0, 255);
-            rightMotorSpeed = constrain(rightMotorSpeed, 0, 255);
-
-            ledcWrite(ledcChannelL, leftMotorSpeed);
-            ledcWrite(ledcChannelR, rightMotorSpeed);
-          
-          unsigned long loopTime = micros() - loopStart;
-
-              // static TickType_t lastDiag = 0;
-              // if ((now - lastDiag) >= pdMS_TO_TICKS(5000)) {
-              //   lastDiag = now;
-                // current_log = "[ControlCore] loop execution: " + String(loopTime) + " us\n";
-              // }
-            }
+  }    
+    }
 }
 
 

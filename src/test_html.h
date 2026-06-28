@@ -49,8 +49,14 @@ const char html[] PROGMEM = R"=====(
         </div>
         <input type="submit" class="btn" value="Update">
         <span id="msg" style="color:green; font-size:12px;"></span>
-        <button type="button" class="btn" style="background:#e53935; margin-top:5px;" onclick="stop()">STOP</button>
-        <span id="msg" style="color:green; font-size:12px;"></span>
+        <button type="button" class="btn" style="background:#e53935; margin-top:5px;" onclick="cmd('stop')">STOP</button>
+        <button type="button" class="btn" style="background:#2E7D32; margin-top:5px;" onclick="cmd('follow')">FOLLOW</button>
+        <button type="button" class="btn" style="background:#1565C0; margin-top:5px;" onclick="cmd('turn')">TURN</button>
+
+        <div style="margin-top:8px; display:flex; gap:5px; align-items:center;">
+            <input type="number" id="pulses" value="5" min="1" style="width:60px;">
+            <button type="button" class="btn" style="width:auto; padding:5px 10px;" onclick="setPulses()">Set Pulses</button>
+        </div>
       </form>
     </div>
   </div>
@@ -93,16 +99,27 @@ const char html[] PROGMEM = R"=====(
           setTimeout(() => m.innerText = "", 1500);
         });
     });
-    function stop() {
-    fetch('/updatePID', { method: 'POST', body: new URLSearchParams({base_speed: 0}) })
+    function cmd(action) {
+    fetch('/' + action)
         .then(r => r.text())
-        .then(() => {
-            document.querySelector('input[name=base_speed]').value = 0;
+        .then(t => {
             const m = document.getElementById('msg');
-            m.innerText = " STOPPED";
-            setTimeout(() => m.innerText = "", 1500);
+            m.innerText = t;
+            setTimeout(() => m.innerText = '', 1500);
         });
-}
+    }
+
+    function setPulses() {
+        const v = document.getElementById('pulses').value;
+        fetch('/setPulses?v=' + v)
+            .then(r => r.text())
+            .then(t => {
+                const m = document.getElementById('msg');
+                m.innerText = t;
+                setTimeout(() => m.innerText = '', 1500);
+            });
+    }
+    
   </script>
 </body>
 </html>
