@@ -175,8 +175,6 @@ void FormHandler() {
     tof_kd = server.arg("tof_kd").toFloat();
     tof_ki = server.arg("tof_ki").toFloat();
 
-    Serial.print("Base Speed: "); Serial.println(baseSpeed);
-    Serial.print("Enc Kp: "); Serial.println(enc_kp);
   }
   server.send(200, "text/plain", "Parameters updated successfully!");
 }
@@ -303,36 +301,29 @@ void readTOF(){
   if(loxL.isRangeComplete() && loxR.isRangeComplete()) {
     left_distance = constrain(updateKalman(kfLeft, loxL.readRangeResult()), 0, 1000);
     right_distance = constrain(updateKalman(kfRight, loxR.readRangeResult()), 0, 1000);
-    Serial.println(left_distance);
-    Serial.println(right_distance);
-    // loxL.startRangeContinuous();
-    // loxR.startRangeContinuous();
   } 
 }
 
-void loop() {
-
-}
+void loop() {}
 
 void Turning_Logic(){
-    // if (center_distance>turning_threshold) {
-    //     if (baseSpeed>min_speed) {
-    //         baseSpeed -= decel*(micros() - last_decel_time)* 1e-6;
-    //     }
-    //     digitalWrite(L1, HIGH);
-    //     digitalWrite(L2, LOW);
-    //     digitalWrite(R1, LOW); 
-    //     digitalWrite(R2, HIGH);
-    //     tofPID();
-    // } else {
+    if (center_distance>turning_threshold) {
+        if (baseSpeed>min_speed) {
+            baseSpeed -= decel*(micros() - last_decel_time)* 1e-6;
+        }
+        digitalWrite(L1, HIGH);
+        digitalWrite(L2, LOW);
+        digitalWrite(R1, LOW); 
+        digitalWrite(R2, HIGH);
+        tofPID();
+    } else {
         static bool turnInitialized = false;
         if(!turnInitialized) {
             turnStartEncL = encCountL;
             turnStartEncR = encCountR;
             turnStartDiff = encCountL - encCountR;  
             last_enc_error = turnStartDiff;
-            // turnDirectionRight = (right_distance > left_distance); 
-            turnDirectionRight = false;
+            turnDirectionRight = (right_distance > left_distance); 
             turnInitialized  = true;
         }
 
@@ -353,9 +344,9 @@ void Turning_Logic(){
 
         if(travelledL >= TURN_PULSES && travelledR >= TURN_PULSES) {
             turnInitialized = false; 
-            robot_state = STOP;
+            robot_state = FOLLOW;
         }
-    // }
+    }
 }
 
 void taskSensorCore(void* pvParameters){
@@ -379,10 +370,10 @@ void taskControlCore(void* pvParameters){
     robot_state = STOP;
     for(;;) {
       vTaskDelayUntil(&xLastWakeTime, xFrequency);
-    //   if(robot_state!=TURN && center_distance<braking_threshold){
-    //     robot_state = TURN;
-    //     last_decel_time = micros();
-    //   }
+      if(robot_state!=TURN && center_distance<braking_threshold){
+        robot_state = TURN;
+        last_decel_time = micros();
+      }
       switch(robot_state){
         case FOLLOW:
             baseSpeed=230;
@@ -399,9 +390,6 @@ void taskControlCore(void* pvParameters){
             ledcWrite(ledcChannelL, 0);
             ledcWrite(ledcChannelR, 0);
             break;
-        
-        
-
   }    
     }
 }
