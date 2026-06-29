@@ -32,9 +32,7 @@ const char html[] PROGMEM = R"=====(
     </div>
     <div class="card">
       <form id="f">
-        <div class="sect">
-          Spd: <input type="number" name="base_speed" min="0" max="255" value="100">
-        </div>
+        
         <div class="sect">
           <strong>Enc PID</strong>
           <div class="row">P:<input type="number" name="enc_kp" step="0.01" value="8.00"></div>
@@ -47,6 +45,15 @@ const char html[] PROGMEM = R"=====(
           <div class="row">D:<input type="number" name="tof_kd" step="0.01" value="0.00"></div>
           <div class="row">I:<input type="number" name="tof_ki" step="0.01" value="0.00"></div>
         </div>
+        <div class="sect">
+    <strong>Motion</strong>
+    <div class="row">Base Spd:<input type="number" name="base_speed" min="0" max="255" value="230"></div>
+    <div class="row">Min Spd:<input type="number" name="min_speed" min="0" max="255" value="120"></div>
+    <div class="row">Turn Spd:<input type="number" name="turn_speed" min="0" max="255" value="180"></div>
+    <div class="row">Decel:<input type="number" name="decel" min="0" value="0"></div>
+    <div class="row">Brake Thresh:<input type="number" name="braking_threshold" step="1" value="350"></div>
+    <div class="row">Turn Thresh:<input type="number" name="turning_threshold" step="1" value="200"></div>
+</div>
         <input type="submit" class="btn" value="Update">
         <span id="msg" style="color:green; font-size:12px;"></span>
         <button type="button" class="btn" style="background:#e53935; margin-top:5px;" onclick="cmd('stop')">STOP</button>
@@ -119,6 +126,18 @@ const char html[] PROGMEM = R"=====(
                 setTimeout(() => m.innerText = '', 1500);
             });
     }
+    // fetch current config on page load
+fetch('/config')
+    .then(r => r.text())
+    .then(t => {
+        const c = t.split(',');
+        document.querySelector('[name=base_speed]').value      = c[0];
+        document.querySelector('[name=min_speed]').value       = c[1];
+        document.querySelector('[name=turn_speed]').value      = c[2];
+        document.querySelector('[name=decel]').value           = c[3];
+        document.querySelector('[name=braking_threshold]').value = c[4];
+        document.querySelector('[name=turning_threshold]').value = c[5];
+    });
     
   </script>
 </body>

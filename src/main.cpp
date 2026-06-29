@@ -23,7 +23,7 @@ const char* pass = "mazebot123";
 
 
 volatile float left_distance = 0; 
-volatile float center_distance = 100;
+volatile float center_distance = 0;
 volatile float right_distance = 0;
 volatile float enc_error = 0;
 float tof_error = 0;
@@ -124,10 +124,12 @@ String current_log = "Booting...";
 
 bool sensorsReady = false;
 
-int decel = 0;
+float decel = 0;
 unsigned int last_decel_time =0;
 int min_speed = 120;
 int turn_speed = 180;
+static bool turnInitialized = false;
+
 
 // Structure to hold Kalman filter states
 struct KalmanFilter {
@@ -166,21 +168,22 @@ void handleData() {
 }
 
 void FormHandler() {
-  if (server.hasArg("base_speed")) {
-    baseSpeed = server.arg("base_speed").toInt();
-  }
+    if (server.hasArg("base_speed"))        baseSpeed          = server.arg("base_speed").toInt();
+    if (server.hasArg("min_speed"))         min_speed          = server.arg("min_speed").toInt();
+    if (server.hasArg("turn_speed"))        turn_speed         = server.arg("turn_speed").toInt();
+    if (server.hasArg("decel"))             decel              = server.arg("decel").toFloat();
+    if (server.hasArg("braking_threshold")) braking_threshold  = server.arg("braking_threshold").toFloat();
+    if (server.hasArg("turning_threshold")) turning_threshold  = server.arg("turning_threshold").toFloat();
 
-  if (server.hasArg("enc_kp")) {
-    enc_kp = server.arg("enc_kp").toFloat();
-    enc_kd = server.arg("enc_kd").toFloat();
-    enc_ki = server.arg("enc_ki").toFloat();
-
-    tof_kp = server.arg("tof_kp").toFloat();
-    tof_kd = server.arg("tof_kd").toFloat();
-    tof_ki = server.arg("tof_ki").toFloat();
-
-  }
-  server.send(200, "text/plain", "Parameters updated successfully!");
+    if (server.hasArg("enc_kp")) {
+        enc_kp = server.arg("enc_kp").toFloat();
+        enc_kd = server.arg("enc_kd").toFloat();
+        enc_ki = server.arg("enc_ki").toFloat();
+        tof_kp = server.arg("tof_kp").toFloat();
+        tof_kd = server.arg("tof_kd").toFloat();
+        tof_ki = server.arg("tof_ki").toFloat();
+    }
+    server.send(200, "text/plain", "Parameters updated successfully!");
 }
 
 void setupAP(){
@@ -196,7 +199,7 @@ void setupAP(){
                     String(enc_error, 1) + "," + 
                     String(pwmerror, 1) + "," + 
                     String(tof_error, 1) + "," +
-                    current_log + " L:" + String(encCountL) + " R:" + String(encCountR);
+                    current_log;
         server.send(200, "text/plain", data);
     });
     server.on("/stop", HTTP_GET, []() {
@@ -222,6 +225,16 @@ void setupAP(){
         server.send(400, "text/plain", "Missing ?v=");
     }
     });
+    
+    server.on("/config", HTTP_GET, []() {
+    String data = String(baseSpeed)          + "," +
+                  String(min_speed)          + "," +
+                  String(turn_speed)         + "," +
+                  String(decel)              + "," +
+                  String(braking_threshold)  + "," +
+                  String(turning_threshold);
+    server.send(200, "text/plain", data);
+});
 
     server.begin();
     Serial.println("HTTP server started");
@@ -277,19 +290,28 @@ void setID(){
 
 }
 
-void EncoderPID(int startErr){
+void EncoderPID(int startErr, bool turningRight){
     enc_error = encCountL - encCountR - startErr;
     float delta = enc_error - last_enc_error;
     
-    pwmerror = (enc_kp * enc_error) + (enc_kd * delta);
-
+    float correction = (enc_kp * enc_error) + (enc_kd * delta);
     last_enc_error = enc_error;
+    pwmerror = correction;
 
-    int leftMotorSpeed = baseSpeed - pwmerror;
-    int rightMotorSpeed = baseSpeed + pwmerror;
+    int leftMotorSpeed;
+    int rightMotorSpeed;
 
-    leftMotorSpeed = constrain(leftMotorSpeed, 0, 255);
-    rightMotorSpeed = constrain(rightMotorSpeed, 0, 255);
+    if(turningRight) {
+        // right turn — left wheel forward, right wheel backward
+        // correction should speed up left or slow down right
+        leftMotorSpeed  = constrain((int)(turn_speed + correction), 0, 255);
+        rightMotorSpeed = constrain((int)(turn_speed - correction), 0, 255);
+    } else {
+        // left turn — right wheel forward, left wheel backward
+        // correction should speed up right or slow down left
+        leftMotorSpeed  = constrain((int)(turn_speed - correction), 0, 255);
+        rightMotorSpeed = constrain((int)(turn_speed + correction), 0, 255);
+    }
 
     ledcWrite(ledcChannelL, leftMotorSpeed);
     ledcWrite(ledcChannelR, rightMotorSpeed);
@@ -335,7 +357,6 @@ void Turning_Logic(){
         digitalWrite(R2, HIGH);
         tofPID();
     } else {
-        static bool turnInitialized = false;
         if(!turnInitialized) {
             turnStartEncL = encCountL;
             turnStartEncR = encCountR;
@@ -352,12 +373,12 @@ void Turning_Logic(){
             digitalWrite(L1, HIGH); digitalWrite(L2, LOW);  
             digitalWrite(R1, HIGH); digitalWrite(R2, LOW);   
             baseSpeed=turn_speed;
-            EncoderPID(turnStartDiff);
+            EncoderPID(turnStartDiff, turnDirectionRight);
         }else {
             digitalWrite(L1, LOW);  digitalWrite(L2, HIGH);  
             digitalWrite(R1, LOW);  digitalWrite(R2, HIGH);  
             baseSpeed=turn_speed;
-            EncoderPID(turnStartDiff);
+            EncoderPID(turnStartDiff, turnDirectionRight);
         }
 
         if(travelledL >= TURN_PULSES && travelledR >= TURN_PULSES) {
@@ -388,8 +409,8 @@ void taskControlCore(void* pvParameters){
     robot_state = STOP;
     for(;;) {
       vTaskDelayUntil(&xLastWakeTime, xFrequency);
-      if(robot_state!=TURN && center_distance<braking_threshold){
-        robot_state = TURN;
+      if(robot_state==FOLLOW && center_distance<braking_threshold){
+        // robot_state = TURN;
         last_decel_time = micros();
       }
       switch(robot_state){
