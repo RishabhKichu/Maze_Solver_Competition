@@ -83,6 +83,9 @@ void IRAM_ATTR isrRight() {
 const int ENC_L = 34;   
 const int ENC_R = 35;   
 
+volatile int motorSpeedL = 0;
+volatile int motorSpeedR = 0;
+
 const int L1   = 19;    
 const int L2   = 18;    
 const int R1   = 16;    
@@ -193,15 +196,17 @@ void setupAP(){
     server.on("/", HTTP_GET, handleRoot);
     server.on("/updatePID", HTTP_POST, FormHandler);
     server.on("/d", HTTP_GET, []() {
-        String data = String(left_distance, 1) + "," + 
-                    String(center_distance, 1) + "," + 
-                    String(right_distance, 1) + "," + 
-                    String(enc_error, 1) + "," + 
-                    String(pwmerror, 1) + "," + 
-                    String(tof_error, 1) + "," +
-                    current_log;
-        server.send(200, "text/plain", data);
-    });
+    String data = String(left_distance, 1) + "," + 
+                String(center_distance, 1) + "," + 
+                String(right_distance, 1) + "," + 
+                String(enc_error, 1) + "," + 
+                String(pwmerror, 1) + "," + 
+                String(tof_error, 1) + "," +
+                current_log + "," +        // d[6]
+                String(motorSpeedL) + "," + // d[7]
+                String(motorSpeedR);        // d[8]
+    server.send(200, "text/plain", data);
+});
     server.on("/stop", HTTP_GET, []() {
     robot_state = STOP;
     server.send(200, "text/plain", "Stopped");
@@ -225,7 +230,7 @@ void setupAP(){
         server.send(400, "text/plain", "Missing ?v=");
     }
     });
-    
+
     server.on("/config", HTTP_GET, []() {
     String data = String(baseSpeed)          + "," +
                   String(min_speed)          + "," +
@@ -274,7 +279,7 @@ void setID(){
     Serial.println("Second VL53L0X initialized successfully");
   }
 
-  pinMode(XSHUT_C, INPUT);
+  pinMode(XSHUT_C, INPUT);  
   delay(10);
 
   if (!loxC.begin(LOX3_ADDRESS, true, &Wire, Adafruit_VL53L0X::VL53L0X_SENSE_HIGH_SPEED)) {
@@ -290,31 +295,18 @@ void setID(){
 
 }
 
-void EncoderPID(int startErr, bool turningRight){
-    enc_error = encCountL - encCountR - startErr;
+void EncoderPID(int startErr){
+    enc_error = (encCountL - encCountR) - startErr;
     float delta = enc_error - last_enc_error;
     
     float correction = (enc_kp * enc_error) + (enc_kd * delta);
     last_enc_error = enc_error;
     pwmerror = correction;
 
-    int leftMotorSpeed;
-    int rightMotorSpeed;
-
-    if(turningRight) {
-        // right turn — left wheel forward, right wheel backward
-        // correction should speed up left or slow down right
-        leftMotorSpeed  = constrain((int)(turn_speed + correction), 0, 255);
-        rightMotorSpeed = constrain((int)(turn_speed - correction), 0, 255);
-    } else {
-        // left turn — right wheel forward, left wheel backward
-        // correction should speed up right or slow down left
-        leftMotorSpeed  = constrain((int)(turn_speed - correction), 0, 255);
-        rightMotorSpeed = constrain((int)(turn_speed + correction), 0, 255);
-    }
-
-    ledcWrite(ledcChannelL, leftMotorSpeed);
-    ledcWrite(ledcChannelR, rightMotorSpeed);
+    motorSpeedL  = constrain((int)(turn_speed - correction), 0, 255);
+    motorSpeedR = constrain((int)(turn_speed + correction), 0, 255);
+    ledcWrite(ledcChannelL, motorSpeedL);
+    ledcWrite(ledcChannelR, motorSpeedR);
 }
 
 void tofPID() {
@@ -329,9 +321,8 @@ void tofPID() {
     int leftMotorSpeed = baseSpeed - pwmerror;
     int rightMotorSpeed = baseSpeed + pwmerror;
 
-    leftMotorSpeed = constrain(leftMotorSpeed, 0, 255);
-    rightMotorSpeed = constrain(rightMotorSpeed, 0, 255);
-
+    motorSpeedL = leftMotorSpeed;
+    motorSpeedR = rightMotorSpeed;
     ledcWrite(ledcChannelL, leftMotorSpeed);
     ledcWrite(ledcChannelR, rightMotorSpeed);
 }
@@ -347,16 +338,16 @@ void readTOF(){
 void loop() {}
 
 void Turning_Logic(){
-    if (center_distance>turning_threshold) {
-        if (baseSpeed>min_speed) {
-            baseSpeed -= decel*(micros() - last_decel_time)* 1e-6;
-        }
-        digitalWrite(L1, HIGH);
-        digitalWrite(L2, LOW);
-        digitalWrite(R1, LOW); 
-        digitalWrite(R2, HIGH);
-        tofPID();
-    } else {
+    // if (center_distance>turning_threshold) {
+    //     if (baseSpeed>min_speed) {
+    //         baseSpeed -= decel*(micros() - last_decel_time)* 1e-6;
+    //     }
+    //     digitalWrite(L1, HIGH);
+    //     digitalWrite(L2, LOW);
+    //     digitalWrite(R1, LOW); 
+    //     digitalWrite(R2, HIGH);
+    //     tofPID();
+    // } else {
         if(!turnInitialized) {
             turnStartEncL = encCountL;
             turnStartEncR = encCountR;
@@ -364,6 +355,7 @@ void Turning_Logic(){
             last_enc_error = turnStartDiff;
             turnDirectionRight = (right_distance > left_distance); 
             turnInitialized  = true;
+            current_log = String(turnStartDiff);
         }
 
         int travelledL = encCountL - turnStartEncL;
@@ -373,19 +365,20 @@ void Turning_Logic(){
             digitalWrite(L1, HIGH); digitalWrite(L2, LOW);  
             digitalWrite(R1, HIGH); digitalWrite(R2, LOW);   
             baseSpeed=turn_speed;
-            EncoderPID(turnStartDiff, turnDirectionRight);
+            EncoderPID(turnStartDiff);
         }else {
             digitalWrite(L1, LOW);  digitalWrite(L2, HIGH);  
             digitalWrite(R1, LOW);  digitalWrite(R2, HIGH);  
             baseSpeed=turn_speed;
-            EncoderPID(turnStartDiff, turnDirectionRight);
+            EncoderPID(turnStartDiff);
         }
 
         if(travelledL >= TURN_PULSES && travelledR >= TURN_PULSES) {
             turnInitialized = false; 
-            robot_state = FOLLOW;
+            robot_state = STOP;
+            // robot_state = FOLLOW;
         }
-    }
+    // }
 }
 
 void taskSensorCore(void* pvParameters){

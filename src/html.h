@@ -29,6 +29,8 @@ const char html[] PROGMEM = R"=====(
       <p>Enc Err: <strong id="s_enc_e">0</strong></p>
       <p>PWM Err: <strong id="s_e1">0</strong></p>
       <p>ToF Err: <strong id="s_e2">0</strong></p>
+      <p>Motor L PWM: <strong id="s_pwml">0</strong></p>
+      <p>Motor R PWM: <strong id="s_pwmr">0</strong></p>
     </div>
     <div class="card">
       <form id="f">
@@ -91,6 +93,10 @@ const char html[] PROGMEM = R"=====(
               const l = document.getElementById('log');
               l.value += "\n" + lastLog;
               l.scrollTop = l.scrollHeight; 
+            }
+            if(d.length >= 9) {
+                document.getElementById('s_pwml').innerText = d[7];
+                document.getElementById('s_pwmr').innerText = d[8];
             }
           }
         }).catch(()=>{});
