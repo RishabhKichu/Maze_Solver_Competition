@@ -23,7 +23,7 @@ const char* pass = "mazebot123";
 
 
 volatile float left_distance = 0; 
-volatile float center_distance = 0;
+volatile float center_distance = 1000;
 volatile float right_distance = 0;
 volatile float enc_error = 0;
 float tof_error = 0;
@@ -35,13 +35,13 @@ float enc_kp = 8;
 float enc_kd = 0;
 float enc_ki = 0;
     
-float tof_kp = 1.1;
-float tof_kd = 45;
+float tof_kp = 0.8;
+float tof_kd = 5;
 float tof_ki = 0;
 
 int baseSpeed = 230;
-float braking_threshold = 350;
-float turning_threshold = 200;
+float braking_threshold = 290;
+float turning_threshold = 150;
 
 int turnStartEncL = 0;
 int turnStartEncR = 0;
@@ -126,13 +126,15 @@ const int CONTROL_HZ = 300;
 String current_log = "Booting...";
 
 bool sensorsReady = false;
+bool NewReading = false;
 
-float decel = 0;
+float decel = 260;
 unsigned int last_decel_time =0;
 int min_speed = 120;
 int turn_speed = 180;
 static bool turnInitialized = false;
-
+int angled_buffer = 40;
+int maze_width = 250;
 
 // Structure to hold Kalman filter states
 struct KalmanFilter {
@@ -310,52 +312,57 @@ void EncoderPID(int startErr){
 }
 
 void tofPID() {
-    float target = 15.0; 
-    tof_error = (left_distance - right_distance); 
-    float delta = tof_error - last_tof_error;
-
+    float target = 15.0;
+    tof_error = (left_distance - right_distance);
+    static float delta = 0;
+    if(NewReading) {
+        delta = tof_error - last_tof_error;
+        last_tof_error = tof_error;
+        NewReading = false;  
+    }
 
     pwmerror = (tof_kp * tof_error) + (tof_kd * delta);
-    last_tof_error = tof_error;
 
     int leftMotorSpeed = baseSpeed - pwmerror;
     int rightMotorSpeed = baseSpeed + pwmerror;
 
-    motorSpeedL = leftMotorSpeed;
-    motorSpeedR = rightMotorSpeed;
-    ledcWrite(ledcChannelL, leftMotorSpeed);
-    ledcWrite(ledcChannelR, rightMotorSpeed);
+    motorSpeedL = constrain((int)leftMotorSpeed, 0, 255);
+    motorSpeedR = constrain((int)rightMotorSpeed, 0, 255);
+    ledcWrite(ledcChannelL, motorSpeedL);
+    ledcWrite(ledcChannelR, motorSpeedR);
 }
 
 void readTOF(){
-  if(loxL.isRangeComplete() && loxR.isRangeComplete()) {
+  if(loxL.isRangeComplete() && loxR.isRangeComplete() && loxC.isRangeComplete()) {
     left_distance = constrain(updateKalman(kfLeft, loxL.readRangeResult()), 0, 1000);
     right_distance = constrain(updateKalman(kfRight, loxR.readRangeResult()), 0, 1000);
     center_distance = constrain(updateKalman(kfCenter, loxC.readRangeResult()), 0, 1000);
-  } 
+    NewReading = true;
+} 
 }
 
 void loop() {}
 
 void Turning_Logic(){
-    // if (center_distance>turning_threshold) {
-    //     if (baseSpeed>min_speed) {
-    //         baseSpeed -= decel*(micros() - last_decel_time)* 1e-6;
-    //     }
-    //     digitalWrite(L1, HIGH);
-    //     digitalWrite(L2, LOW);
-    //     digitalWrite(R1, LOW); 
-    //     digitalWrite(R2, HIGH);
-    //     tofPID();
-    // } else {
+    if (center_distance>turning_threshold) {
+        if (baseSpeed>min_speed) {
+            baseSpeed -= decel*(micros() - last_decel_time)* 1e-6;
+        }
+        current_log = "BRAKING";
+        digitalWrite(L1, HIGH);
+        digitalWrite(L2, LOW);
+        digitalWrite(R1, LOW); 
+        digitalWrite(R2, HIGH);
+        tofPID();
+    } else {
+        current_log = "TURNING";
         if(!turnInitialized) {
             turnStartEncL = encCountL;
             turnStartEncR = encCountR;
             turnStartDiff = encCountL - encCountR;  
-            last_enc_error = turnStartDiff;
+            last_enc_error = 0;
             turnDirectionRight = (right_distance > left_distance); 
             turnInitialized  = true;
-            current_log = String(turnStartDiff);
         }
 
         int travelledL = encCountL - turnStartEncL;
@@ -364,21 +371,18 @@ void Turning_Logic(){
         if(turnDirectionRight){
             digitalWrite(L1, HIGH); digitalWrite(L2, LOW);  
             digitalWrite(R1, HIGH); digitalWrite(R2, LOW);   
-            baseSpeed=turn_speed;
             EncoderPID(turnStartDiff);
         }else {
             digitalWrite(L1, LOW);  digitalWrite(L2, HIGH);  
             digitalWrite(R1, LOW);  digitalWrite(R2, HIGH);  
-            baseSpeed=turn_speed;
             EncoderPID(turnStartDiff);
         }
 
         if(travelledL >= TURN_PULSES && travelledR >= TURN_PULSES) {
             turnInitialized = false; 
-            robot_state = STOP;
-            // robot_state = FOLLOW;
+            robot_state = FOLLOW;
         }
-    // }
+    }
 }
 
 void taskSensorCore(void* pvParameters){
@@ -402,8 +406,10 @@ void taskControlCore(void* pvParameters){
     robot_state = STOP;
     for(;;) {
       vTaskDelayUntil(&xLastWakeTime, xFrequency);
-      if(robot_state==FOLLOW && center_distance<braking_threshold){
-        // robot_state = TURN;
+      if(robot_state==FOLLOW && center_distance<braking_threshold && left_distance + right_distance < (maze_width - 45 + angled_buffer)){
+
+        robot_state = TURN;
+        current_log = "Switching to turn";
         last_decel_time = micros();
       }
       switch(robot_state){
@@ -413,6 +419,7 @@ void taskControlCore(void* pvParameters){
             digitalWrite(L2, LOW);
             digitalWrite(R1, LOW); 
             digitalWrite(R2, HIGH);
+            
             tofPID();
             break;
         case TURN:
