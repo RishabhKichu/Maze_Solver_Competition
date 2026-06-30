@@ -40,14 +40,13 @@ float tof_kd = 5;
 float tof_ki = 0;
 
 int baseSpeed = 230;
-float braking_threshold = 290;
 float turning_threshold = 150;
 
 int turnStartEncL = 0;
 int turnStartEncR = 0;
 int turnStartDiff = 0;
 bool turnDirectionRight = false;
-int TURN_PULSES = 380;
+int TURN_PULSES = 450;
 
 enum RobotState {
     STOP,
@@ -128,13 +127,12 @@ String current_log = "Booting...";
 bool sensorsReady = false;
 bool NewReading = false;
 
-float decel = 260;
-unsigned int last_decel_time =0;
 int min_speed = 120;
 int turn_speed = 180;
 static bool turnInitialized = false;
-int angled_buffer = 40;
 int maze_width = 250;
+unsigned long BrakeStartTime = 0;
+const int Brake_Duration = 80;
 
 // Structure to hold Kalman filter states
 struct KalmanFilter {
@@ -176,10 +174,8 @@ void FormHandler() {
     if (server.hasArg("base_speed"))        baseSpeed          = server.arg("base_speed").toInt();
     if (server.hasArg("min_speed"))         min_speed          = server.arg("min_speed").toInt();
     if (server.hasArg("turn_speed"))        turn_speed         = server.arg("turn_speed").toInt();
-    if (server.hasArg("decel"))             decel              = server.arg("decel").toFloat();
-    if (server.hasArg("braking_threshold")) braking_threshold  = server.arg("braking_threshold").toFloat();
     if (server.hasArg("turning_threshold")) turning_threshold  = server.arg("turning_threshold").toFloat();
-
+    Serial.println(String(turning_threshold) + "....."+  String(baseSpeed) + "....."+  String(min_speed) + "....."+  String(turn_speed));
     if (server.hasArg("enc_kp")) {
         enc_kp = server.arg("enc_kp").toFloat();
         enc_kd = server.arg("enc_kd").toFloat();
@@ -204,9 +200,10 @@ void setupAP(){
                 String(enc_error, 1) + "," + 
                 String(pwmerror, 1) + "," + 
                 String(tof_error, 1) + "," +
-                current_log + "," +        // d[6]
-                String(motorSpeedL) + "," + // d[7]
-                String(motorSpeedR);        // d[8]
+                current_log + "," +
+                String(motorSpeedL) + "," + 
+                String(motorSpeedR) + "," +
+                String((int)robot_state);        
     server.send(200, "text/plain", data);
 });
     server.on("/stop", HTTP_GET, []() {
@@ -237,9 +234,8 @@ void setupAP(){
     String data = String(baseSpeed)          + "," +
                   String(min_speed)          + "," +
                   String(turn_speed)         + "," +
-                  String(decel)              + "," +
-                  String(braking_threshold)  + "," +
-                  String(turning_threshold);
+                  String(turning_threshold) + "," +
+                  String(Brake_Duration);
     server.send(200, "text/plain", data);
 });
 
@@ -312,14 +308,32 @@ void EncoderPID(int startErr){
 }
 
 void tofPID() {
-    float target = 15.0;
-    tof_error = (left_distance - right_distance);
     static float delta = 0;
-    if(NewReading) {
-        delta = tof_error - last_tof_error;
-        last_tof_error = tof_error;
-        NewReading = false;  
+    if(left_distance < 230 && right_distance < 230){
+        tof_error = (left_distance - right_distance);
+        if(NewReading) {
+            delta = tof_error - last_tof_error;
+            last_tof_error = tof_error;
+            NewReading = false;  
+        }
+    } else if(left_distance >230){
+        current_log = "Switched to right Tof correction";
+        tof_error = ((maze_width/2)-(22.5) - right_distance);
+        if(NewReading) {
+            delta = tof_error - last_tof_error;
+            last_tof_error = tof_error;
+            NewReading = false;  
+        }
+    } else{
+        current_log = "Switched to left Tof correction";
+        tof_error = left_distance - ((maze_width/2)-(22.5) );
+        if(NewReading) {
+            delta = tof_error - last_tof_error;
+            last_tof_error = tof_error;
+            NewReading = false;  
+        }
     }
+    
 
     pwmerror = (tof_kp * tof_error) + (tof_kd * delta);
 
@@ -344,19 +358,12 @@ void readTOF(){
 void loop() {}
 
 void Turning_Logic(){
-    if (center_distance>turning_threshold) {
-        if (baseSpeed>min_speed) {
-            baseSpeed -= decel*(micros() - last_decel_time)* 1e-6;
-        }
-        current_log = "BRAKING";
-        digitalWrite(L1, HIGH);
-        digitalWrite(L2, LOW);
-        digitalWrite(R1, LOW); 
-        digitalWrite(R2, HIGH);
-        tofPID();
-    } else {
-        current_log = "TURNING";
         if(!turnInitialized) {
+            if(current_log="turning"){
+                current_log = "TURNING";
+            } else{
+                current_log = "turning";
+            }
             turnStartEncL = encCountL;
             turnStartEncR = encCountR;
             turnStartDiff = encCountL - encCountR;  
@@ -364,9 +371,15 @@ void Turning_Logic(){
             turnDirectionRight = (right_distance > left_distance); 
             turnInitialized  = true;
         }
+        
+        if(encCountL < turnStartEncL+Brake_Duration && encCountR < turnStartEncR + Brake_Duration){
+            digitalWrite(L1, LOW); digitalWrite(L2, HIGH);  
+            digitalWrite(R1, HIGH); digitalWrite(R2, LOW); 
+            EncoderPID(turnStartDiff);
+        }else{
 
-        int travelledL = encCountL - turnStartEncL;
-        int travelledR = encCountR - turnStartEncR;
+        int travelledL = encCountL - turnStartEncL - Brake_Duration;
+        int travelledR = encCountR - turnStartEncR - Brake_Duration;
         
         if(turnDirectionRight){
             digitalWrite(L1, HIGH); digitalWrite(L2, LOW);  
@@ -381,8 +394,8 @@ void Turning_Logic(){
         if(travelledL >= TURN_PULSES && travelledR >= TURN_PULSES) {
             turnInitialized = false; 
             robot_state = FOLLOW;
-        }
-    }
+        }}
+    
 }
 
 void taskSensorCore(void* pvParameters){
@@ -406,11 +419,10 @@ void taskControlCore(void* pvParameters){
     robot_state = STOP;
     for(;;) {
       vTaskDelayUntil(&xLastWakeTime, xFrequency);
-      if(robot_state==FOLLOW && center_distance<braking_threshold && left_distance + right_distance < (maze_width - 45 + angled_buffer)){
+      if(robot_state==FOLLOW && center_distance<turning_threshold && (left_distance > 200 || right_distance > 200)){
 
         robot_state = TURN;
         current_log = "Switching to turn";
-        last_decel_time = micros();
       }
       switch(robot_state){
         case FOLLOW:
@@ -435,7 +447,6 @@ void taskControlCore(void* pvParameters){
 
 void setup() {
     Serial.begin(115200);
-    delay(2000);
     Wire.begin(sda, scl);
     current_log = "RST C0:" + getResetReason(rtc_get_reset_reason(0)) +
                   " C1:" + getResetReason(rtc_get_reset_reason(1));

@@ -31,6 +31,7 @@ const char html[] PROGMEM = R"=====(
       <p>ToF Err: <strong id="s_e2">0</strong></p>
       <p>Motor L PWM: <strong id="s_pwml">0</strong></p>
       <p>Motor R PWM: <strong id="s_pwmr">0</strong></p>
+      <p>State: <strong id="s_state">0</strong></p>
     </div>
     <div class="card">
       <form id="f">
@@ -43,8 +44,8 @@ const char html[] PROGMEM = R"=====(
         </div>
         <div class="sect">
           <strong>ToF PID</strong>
-          <div class="row">P:<input type="number" name="tof_kp" step="0.01" value="1.10"></div>
-          <div class="row">D:<input type="number" name="tof_kd" step="0.01" value="45"></div>
+          <div class="row">P:<input type="number" name="tof_kp" step="0.01" value="0.8"></div>
+          <div class="row">D:<input type="number" name="tof_kd" step="0.01" value="4"></div>
           <div class="row">I:<input type="number" name="tof_ki" step="0.01" value="0.00"></div>
         </div>
         <div class="sect">
@@ -52,9 +53,8 @@ const char html[] PROGMEM = R"=====(
     <div class="row">Base Spd:<input type="number" name="base_speed" min="0" max="255" value="230"></div>
     <div class="row">Min Spd:<input type="number" name="min_speed" min="0" max="255" value="120"></div>
     <div class="row">Turn Spd:<input type="number" name="turn_speed" min="0" max="255" value="180"></div>
-    <div class="row">Decel:<input type="number" name="decel" min="0" value="260"></div>
-    <div class="row">Brake Thresh:<input type="number" name="braking_threshold" step="1" value="150"></div>
-    <div class="row">Turn Thresh:<input type="number" name="turning_threshold" step="1" value="290"></div>
+    <div class="row">Turn Thresh:<input type="number" name="turning_threshold" step="1" value="100"></div>
+    <div class="row">Braking:<input type="number" name="braking_threshold" step="1" value="80"></div>
 </div>
         <input type="submit" class="btn" value="Update">
         <span id="msg" style="color:green; font-size:12px;"></span>
@@ -94,9 +94,10 @@ const char html[] PROGMEM = R"=====(
               l.value += "\n" + lastLog;
               l.scrollTop = l.scrollHeight; 
             }
-            if(d.length >= 9) {
+            if(d.length >= 10) {
                 document.getElementById('s_pwml').innerText = d[7];
                 document.getElementById('s_pwmr').innerText = d[8];
+                document.getElementByID('s_state').innerText = d[9];
             }
           }
         }).catch(()=>{});
@@ -140,9 +141,8 @@ fetch('/config')
         document.querySelector('[name=base_speed]').value      = c[0];
         document.querySelector('[name=min_speed]').value       = c[1];
         document.querySelector('[name=turn_speed]').value      = c[2];
-        document.querySelector('[name=decel]').value           = c[3];
+        document.querySelector('[name=turning_threshold]').value = c[3];
         document.querySelector('[name=braking_threshold]').value = c[4];
-        document.querySelector('[name=turning_threshold]').value = c[5];
     });
     
   </script>
