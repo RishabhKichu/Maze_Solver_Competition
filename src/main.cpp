@@ -40,13 +40,13 @@ float tof_kd = 5;
 float tof_ki = 0;
 
 int baseSpeed = 230;
-float turning_threshold = 150;
+float turning_threshold = 200;
 
 int turnStartEncL = 0;
 int turnStartEncR = 0;
 int turnStartDiff = 0;
 bool turnDirectionRight = false;
-int TURN_PULSES = 450;
+int TURN_PULSES = 700;
 
 enum RobotState {
     STOP,
@@ -129,11 +129,11 @@ bool sensorsReady = false;
 bool NewReading = false;
 
 int min_speed = 120;
-int turn_speed = 180;
+int turn_speed = 230;
 static bool turnInitialized = false;
 int maze_width = 250;
-unsigned long BrakeStartTime = 0;
-const int Brake_Duration = 80;
+unsigned long TurnStartTime = 0;
+int Brake_Duration = 20;
 
 // Structure to hold Kalman filter states
 struct KalmanFilter {
@@ -176,7 +176,9 @@ void FormHandler() {
     if (server.hasArg("min_speed"))         min_speed          = server.arg("min_speed").toInt();
     if (server.hasArg("turn_speed"))        turn_speed         = server.arg("turn_speed").toInt();
     if (server.hasArg("turning_threshold")) turning_threshold  = server.arg("turning_threshold").toFloat();
-    Serial.println(String(turning_threshold) + "....."+  String(baseSpeed) + "....."+  String(min_speed) + "....."+  String(turn_speed));
+    if (server.hasArg("braking_threshold")) Brake_Duration  = server.arg("braking_threshold").toInt();
+    if (server.hasArg("turn_pulses")) TURN_PULSES  = server.arg("turn_pulses").toInt();
+    Serial.println(String(turning_threshold) + "....."+  String(baseSpeed) + "....."+  String(min_speed) + "....."+  String(TURN_PULSES));
     if (server.hasArg("enc_kp")) {
         enc_kp = server.arg("enc_kp").toFloat();
         enc_kd = server.arg("enc_kd").toFloat();
@@ -222,21 +224,14 @@ void setupAP(){
     server.send(200, "text/plain", "Turning");
     });
 
-    server.on("/setPulses", HTTP_GET, []() {
-    if(server.hasArg("v")) {
-        TURN_PULSES = server.arg("v").toInt();
-        server.send(200, "text/plain", "Pulses set to " + String(TURN_PULSES));
-    } else {
-        server.send(400, "text/plain", "Missing ?v=");
-    }
-    });
-
     server.on("/config", HTTP_GET, []() {
     String data = String(baseSpeed)          + "," +
                   String(min_speed)          + "," +
                   String(turn_speed)         + "," +
                   String(turning_threshold) + "," +
-                  String(Brake_Duration);
+                  String(Brake_Duration) + "," +
+                  String(TURN_PULSES);
+    Serial.println(TURN_PULSES);
     server.send(200, "text/plain", data);
 });
 
@@ -310,32 +305,34 @@ void EncoderPID(int startErr){
 
 void tofPID() {
     static float delta = 0;
+    static int lastMode = -1;
+    int currentmode;
     if(left_distance < 230 && right_distance < 230){
+        currentmode = 0;
         tof_error = (left_distance - right_distance);
-        if(NewReading) {
-            delta = tof_error - last_tof_error;
-            last_tof_error = tof_error;
-            NewReading = false;  
-        }
+        
     } else if(left_distance >230){
+        currentmode = 1;
         current_log = "Switched to right Tof correction";
         tof_error = ((maze_width/2)-(22.5) - right_distance);
-        if(NewReading) {
-            delta = tof_error - last_tof_error;
-            last_tof_error = tof_error;
-            NewReading = false;  
-        }
+        
     } else{
+        currentmode = 2;
         current_log = "Switched to left Tof correction";
         tof_error = left_distance - ((maze_width/2)-(22.5) );
-        if(NewReading) {
+        
+    }
+    
+    if(currentmode != lastMode) {
+        last_tof_error = tof_error;
+        delta = 0;
+        lastMode = currentmode;
+        NewReading = false;  
+    } else if(NewReading) {
             delta = tof_error - last_tof_error;
             last_tof_error = tof_error;
             NewReading = false;  
         }
-    }
-    
-
     pwmerror = (tof_kp * tof_error) + (tof_kd * delta);
 
     int leftMotorSpeed = baseSpeed - pwmerror;
@@ -349,10 +346,27 @@ void tofPID() {
 
 void readTOF(){
   if(loxL.isRangeComplete() && loxR.isRangeComplete() && loxC.isRangeComplete()) {
-    left_distance = constrain(updateKalman(kfLeft, loxL.readRangeResult()), 0, 1000);
-    right_distance = constrain(updateKalman(kfRight, loxR.readRangeResult()), 0, 1000);
-    center_distance = constrain(updateKalman(kfCenter, loxC.readRangeResult()), 0, 1000);
-    NewReading = true;
+    uint16_t rawL = loxL.readRangeResult();
+        uint16_t rawR = loxR.readRangeResult();
+        uint16_t rawC = loxC.readRangeResult();
+        if(rawL>1000){
+            left_distance = 1000;
+        }else{
+            left_distance = constrain(updateKalman(kfLeft, rawL), 0, 1000);
+        }
+        if(rawR>1000){
+            right_distance = 1000;
+        } else{
+            right_distance = constrain(updateKalman(kfRight, rawR), 0, 1000);
+        }
+        if(rawC>1000){
+            center_distance = 1000;
+        } else {
+            center_distance = constrain(updateKalman(kfCenter, rawC), 0, 1000);
+        }
+
+        
+        NewReading = true;
 } 
 }
 
@@ -360,52 +374,61 @@ void loop() {}
 
 void Turning_Logic(){
         if(!turnInitialized) {
-            if(current_log="turning"){
-                current_log = "TURNING";
-            } else{
-                current_log = "turning";
-            }
+
             turnStartEncL = encCountL;
             turnStartEncR = encCountR;
+            TurnStartTime = micros();
             turnStartDiff = encCountL - encCountR;  
             last_enc_error = 0;
             turnDirectionRight = (right_distance > left_distance); 
             turnInitialized  = true;
         }
         
-        if(encCountL < turnStartEncL+Brake_Duration && encCountR < turnStartEncR + Brake_Duration){
-            digitalWrite(L1, LOW); digitalWrite(L2, HIGH);  
-            digitalWrite(R1, HIGH); digitalWrite(R2, LOW); 
-            EncoderPID(turnStartDiff);
-        }else{
+        if(turnDirectionRight && encCountR < turnStartEncR + Brake_Duration){
+            digitalWrite(R1, HIGH); digitalWrite(R2, LOW);   
+
+        } else if(!turnDirectionRight && encCountL < turnStartEncL+Brake_Duration ){
+            digitalWrite(L1, LOW);  digitalWrite(L2, HIGH);  
+
+        }
+
 
         int travelledL = encCountL - turnStartEncL - Brake_Duration;
         int travelledR = encCountR - turnStartEncR - Brake_Duration;
         
         if(turnDirectionRight){
             digitalWrite(L1, HIGH); digitalWrite(L2, LOW);  
-            digitalWrite(R1, HIGH); digitalWrite(R2, LOW);   
-            EncoderPID(turnStartDiff);
+            ledcWrite(ledcChannelL, turn_speed);
+            ledcWrite(ledcChannelR, 0);
+            if(travelledL >= TURN_PULSES) {
+                turnInitialized = false;
+                current_log = "Turn Complete!";
+                current_log = micros() - TurnStartTime; 
+                robot_state = FOLLOW;
+            }   
         }else {
-            digitalWrite(L1, LOW);  digitalWrite(L2, HIGH);  
             digitalWrite(R1, LOW);  digitalWrite(R2, HIGH);  
-            EncoderPID(turnStartDiff);
+            ledcWrite(ledcChannelL, 0);
+            ledcWrite(ledcChannelR, turn_speed);
+            if(travelledR >= TURN_PULSES) {
+                current_log = "Turn Complete!";
+                turnInitialized = false; 
+                current_log = micros() - TurnStartTime; 
+                robot_state = FOLLOW;
+            }  
         }
 
-        if(travelledL >= TURN_PULSES && travelledR >= TURN_PULSES) {
-            turnInitialized = false; 
-            robot_state = FOLLOW;
-        }}
+        
     
 }
 
 void taskSensorCore(void* pvParameters){
     setID();
-    setupAP();
+    // setupAP();
 
     for(;;) {
         readTOF();
-        server.handleClient();
+        // server.handleClient();
         vTaskDelay(pdMS_TO_TICKS(5));
       }
 }
@@ -417,7 +440,7 @@ void taskControlCore(void* pvParameters){
     const TickType_t xFrequency = pdMS_TO_TICKS(1000 / CONTROL_HZ);
     TickType_t xLastWakeTime = xTaskGetTickCount();
 
-    robot_state = STOP;
+    robot_state = FOLLOW;
     for(;;) {
       vTaskDelayUntil(&xLastWakeTime, xFrequency);
       if(robot_state==FOLLOW && center_distance<turning_threshold && (left_distance > 200 || right_distance > 200)){
@@ -472,7 +495,7 @@ void setup() {
     "SensorCore",      // name
     8192,              // stack size (bytes) — WiFi needs generous stack
     NULL,              // parameters
-    24,                 // priority
+    20,                 // priority
     &sensorTaskHandle, // handle
     0                  // core 0 — WiFi lives here
     );

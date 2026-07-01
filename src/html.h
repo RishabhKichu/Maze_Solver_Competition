@@ -52,9 +52,10 @@ const char html[] PROGMEM = R"=====(
     <strong>Motion</strong>
     <div class="row">Base Spd:<input type="number" name="base_speed" min="0" max="255" value="230"></div>
     <div class="row">Min Spd:<input type="number" name="min_speed" min="0" max="255" value="120"></div>
-    <div class="row">Turn Spd:<input type="number" name="turn_speed" min="0" max="255" value="180"></div>
+    <div class="row">Turn Spd:<input type="number" name="turn_speed" min="0" max="255" value="230"></div>
     <div class="row">Turn Thresh:<input type="number" name="turning_threshold" step="1" value="100"></div>
-    <div class="row">Braking:<input type="number" name="braking_threshold" step="1" value="80"></div>
+    <div class="row">Braking:<input type="number" name="braking_threshold" step="1" value="40"></div>
+    <div class="row">Turn Pulses:<input type="number" name="turn_pulses" step="1" value="800"></div>
 </div>
         <input type="submit" class="btn" value="Update">
         <span id="msg" style="color:green; font-size:12px;"></span>
@@ -62,10 +63,6 @@ const char html[] PROGMEM = R"=====(
         <button type="button" class="btn" style="background:#2E7D32; margin-top:5px;" onclick="cmd('follow')">FOLLOW</button>
         <button type="button" class="btn" style="background:#1565C0; margin-top:5px;" onclick="cmd('turn')">TURN</button>
 
-        <div style="margin-top:8px; display:flex; gap:5px; align-items:center;">
-            <input type="number" id="pulses" value="5" min="1" style="width:60px;">
-            <button type="button" class="btn" style="width:auto; padding:5px 10px;" onclick="setPulses()">Set Pulses</button>
-        </div>
       </form>
     </div>
   </div>
@@ -123,16 +120,6 @@ const char html[] PROGMEM = R"=====(
         });
     }
 
-    function setPulses() {
-        const v = document.getElementById('pulses').value;
-        fetch('/setPulses?v=' + v)
-            .then(r => r.text())
-            .then(t => {
-                const m = document.getElementById('msg');
-                m.innerText = t;
-                setTimeout(() => m.innerText = '', 1500);
-            });
-    }
     // fetch current config on page load
 fetch('/config')
     .then(r => r.text())
@@ -143,6 +130,7 @@ fetch('/config')
         document.querySelector('[name=turn_speed]').value      = c[2];
         document.querySelector('[name=turning_threshold]').value = c[3];
         document.querySelector('[name=braking_threshold]').value = c[4];
+        document.querySelector('[name=turn_pulses]').value = c[5];
     });
     
   </script>
