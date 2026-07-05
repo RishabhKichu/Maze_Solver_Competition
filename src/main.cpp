@@ -35,8 +35,8 @@ float enc_kp = 8;
 float enc_kd = 0;
 float enc_ki = 0;
     
-float tof_kp = 0.8;
-float tof_kd = 5;
+float tof_kp = 0.2;
+float tof_kd = 1;
 float tof_ki = 0;
 
 int baseSpeed = 230;
