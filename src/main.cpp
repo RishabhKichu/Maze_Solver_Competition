@@ -36,17 +36,20 @@ float enc_kd = 0;
 float enc_ki = 0;
     
 float tof_kp = 0.2;
-float tof_kd = 1.5;
+float tof_kd = 4;
 float tof_ki = 0;
 
-int baseSpeed = 200;
+int baseSpeed = 230;
 float turning_threshold = 200;
 
 int turnStartEncL = 0;
 int turnStartEncR = 0;
 int turnStartDiff = 0;
 bool turnDirectionRight = false;
-int TURN_PULSES = 750;
+int TURN_PULSES = 860;
+int turnendEncL = 0;
+int turnendEncR = 0;
+int turn_buffer = 500;
 
 enum RobotState {
     STOP,
@@ -129,11 +132,11 @@ bool sensorsReady = false;
 bool NewReading = false;
 
 int min_speed = 120;
-int turn_speed = 230;
+int turn_speed = 200;
 static bool turnInitialized = false;
 int maze_width = 250;
 unsigned long TurnStartTime = 0;
-int Brake_Duration = 50000;
+int Brake_Duration = 20000;
 
 // Structure to hold Kalman filter states
 struct KalmanFilter {
@@ -305,19 +308,26 @@ void tofPID() {
     static float delta = 0;
     static int lastMode = -1;
     int currentmode;
-    if(left_distance < 230 && right_distance < 230){
+    float left,right,center;
+
+    portENTER_CRITICAL(&mux);
+
+    left = left_distance;
+    right = right_distance;
+    center = center_distance;
+
+    portEXIT_CRITICAL(&mux);
+    if(left < 230 && right < 230){
         currentmode = 0;
-        tof_error = (left_distance - right_distance);
+        tof_error = (left - right);
         
-    } else if(left_distance >230){
+    } else if(left >230){
         currentmode = 1;
-        strcpy(current_log, "Switched to right ToF correction!");
-        tof_error = ((maze_width/2)-(22.5) - right_distance);
+        tof_error = ((maze_width/2)-(22.5) - right);
         
     } else{
         currentmode = 2;
-        strcpy(current_log, "Switched to left ToF correction");
-        tof_error = left_distance - ((maze_width/2)-(22.5) );
+        tof_error = left - ((maze_width/2)-(22.5) );
         
     }
     
@@ -325,6 +335,7 @@ void tofPID() {
         last_tof_error = tof_error;
         delta = 0;
         lastMode = currentmode;
+        strcpy(current_log, "Mode Change");
         NewReading = false;  
     } else if(NewReading) {
             delta = tof_error - last_tof_error;
@@ -411,6 +422,8 @@ void Turning_Logic(){
                 last_tof_error = 0;
                 tof_error = 0;
                 snprintf(current_log, sizeof(current_log), "Turn Complete! Time: %lu", micros() - TurnStartTime);
+                turnendEncL = encCountL;
+                turnendEncR = encCountR;
                 robot_state = FOLLOW;
             }   
         }else {
@@ -419,6 +432,8 @@ void Turning_Logic(){
             ledcWrite(ledcChannelR, turn_speed);
             if(travelledR >= TURN_PULSES) {
                 snprintf(current_log, sizeof(current_log), "Turn Complete! Time: %lu", micros() - TurnStartTime);
+                turnendEncL = encCountL;
+                turnendEncR = encCountR;
                 last_tof_error = 0;
                 turnInitialized = false; 
                 tof_error = 0;
@@ -452,9 +467,10 @@ void taskControlCore(void* pvParameters){
     for(;;) {
       vTaskDelayUntil(&xLastWakeTime, xFrequency);
       if(robot_state==FOLLOW && center_distance<((maze_width/2) + 42.5) && (left_distance > 200 || right_distance > 200)){
-
-        robot_state = TURN;
-        strcpy(current_log, "Switching to turn");
+        if(turnendEncL && encCountL - turnendEncL > turn_buffer && turnendEncR && encCountR - turnendEncR > turn_buffer){
+            robot_state = TURN;
+            strcpy(current_log, "Switching to turn");
+        }
       }
       switch(robot_state){
         case FOLLOW:

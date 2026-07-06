@@ -45,7 +45,7 @@ const char html[] PROGMEM = R"=====(
         <div class="sect">
           <strong>ToF PID</strong>
           <div class="row">P:<input type="number" name="tof_kp" step="0.01" value="0.2"></div>
-          <div class="row">D:<input type="number" name="tof_kd" step="0.01" value="1.5"></div>
+          <div class="row">D:<input type="number" name="tof_kd" step="0.01" value="4"></div>
           <div class="row">I:<input type="number" name="tof_ki" step="0.01" value="0.00"></div>
         </div>
         <div class="sect">
