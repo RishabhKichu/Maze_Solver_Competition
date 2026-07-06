@@ -5,15 +5,15 @@
 #include "html.h"
 #include "rom/rtc.h"
 
-String getResetReason(RESET_REASON reason) {
+const char* getResetReason(RESET_REASON reason) {
     switch (reason) {
         case 1:  return "POWERON";
         case 3:  return "SW_RESET";
-        case 7:  return "TG0WDT";      // task watchdog core 0
-        case 8:  return "TG1WDT";      // task watchdog core 1
+        case 7:  return "TG0WDT";
+        case 8:  return "TG1WDT";
         case 12: return "SW_CPU_RESET";
-        case 15: return "BROWNOUT";    // power issue
-        default: return "UNKNOWN(" + String(reason) + ")";
+        case 15: return "BROWNOUT";
+        default: return "UNKNOWN";
     }
 }
 
@@ -36,17 +36,17 @@ float enc_kd = 0;
 float enc_ki = 0;
     
 float tof_kp = 0.2;
-float tof_kd = 1;
+float tof_kd = 1.5;
 float tof_ki = 0;
 
-int baseSpeed = 230;
+int baseSpeed = 200;
 float turning_threshold = 200;
 
 int turnStartEncL = 0;
 int turnStartEncR = 0;
 int turnStartDiff = 0;
 bool turnDirectionRight = false;
-int TURN_PULSES = 700;
+int TURN_PULSES = 750;
 
 enum RobotState {
     STOP,
@@ -85,10 +85,10 @@ const int ENC_R = 35;
 volatile int motorSpeedL = 0;
 volatile int motorSpeedR = 0;
 
-const int L1   = 19;    
-const int L2   = 18;    
-const int R1   = 16;    
+const int L2   = 19;    
+const int L1   = 18;    
 const int R2   = 17;    
+const int R1   = 16;    
 
 const int PWML = 32;    
 const int PWMR = 33;    
@@ -100,7 +100,7 @@ const int sda = 21;
 // XSHUT PINS
 const int XSHUT_L = 25;   
 const int XSHUT_R = 26;
-const int XSHUT_C = 4;
+const int XSHUT_C = 27;
 
 const int freq = 5000;
 const int ledcChannelL = 0;
@@ -123,7 +123,7 @@ TaskHandle_t controlTaskHandle;
 
 const int CONTROL_HZ = 300;
 
-String current_log = "Booting...";
+char current_log[64] = "Booting...";
 
 bool sensorsReady = false;
 bool NewReading = false;
@@ -133,7 +133,7 @@ int turn_speed = 230;
 static bool turnInitialized = false;
 int maze_width = 250;
 unsigned long TurnStartTime = 0;
-int Brake_Duration = 20;
+int Brake_Duration = 50000;
 
 // Structure to hold Kalman filter states
 struct KalmanFilter {
@@ -178,7 +178,6 @@ void FormHandler() {
     if (server.hasArg("turning_threshold")) turning_threshold  = server.arg("turning_threshold").toFloat();
     if (server.hasArg("braking_threshold")) Brake_Duration  = server.arg("braking_threshold").toInt();
     if (server.hasArg("turn_pulses")) TURN_PULSES  = server.arg("turn_pulses").toInt();
-    Serial.println(String(turning_threshold) + "....."+  String(baseSpeed) + "....."+  String(min_speed) + "....."+  String(TURN_PULSES));
     if (server.hasArg("enc_kp")) {
         enc_kp = server.arg("enc_kp").toFloat();
         enc_kd = server.arg("enc_kd").toFloat();
@@ -197,17 +196,19 @@ void setupAP(){
     server.on("/", HTTP_GET, handleRoot);
     server.on("/updatePID", HTTP_POST, FormHandler);
     server.on("/d", HTTP_GET, []() {
-    String data = String(left_distance, 1) + "," + 
-                String(center_distance, 1) + "," + 
-                String(right_distance, 1) + "," + 
-                String(enc_error, 1) + "," + 
-                String(pwmerror, 1) + "," + 
-                String(tof_error, 1) + "," +
-                current_log + "," +
-                String(motorSpeedL) + "," + 
-                String(motorSpeedR) + "," +
-                String((int)robot_state);        
-    server.send(200, "text/plain", data);
+    char buf[256];
+    snprintf(buf, sizeof(buf), "%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%s,%d,%d,%d",
+        (float)left_distance,
+        (float)center_distance,
+        (float)right_distance,
+        (float)enc_error,
+        (float)pwmerror,
+        tof_error,
+        current_log,
+        (int)motorSpeedL,
+        (int)motorSpeedR,
+        (int)robot_state);
+    server.send(200, "text/plain", buf);
 });
     server.on("/stop", HTTP_GET, []() {
     robot_state = STOP;
@@ -225,14 +226,11 @@ void setupAP(){
     });
 
     server.on("/config", HTTP_GET, []() {
-    String data = String(baseSpeed)          + "," +
-                  String(min_speed)          + "," +
-                  String(turn_speed)         + "," +
-                  String(turning_threshold) + "," +
-                  String(Brake_Duration) + "," +
-                  String(TURN_PULSES);
-    Serial.println(TURN_PULSES);
-    server.send(200, "text/plain", data);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%d,%d,%d,%.1f,%d,%d",
+        baseSpeed, min_speed, turn_speed,
+        turning_threshold, Brake_Duration, TURN_PULSES);
+    server.send(200, "text/plain", buf);
 });
 
     server.begin();
@@ -313,12 +311,12 @@ void tofPID() {
         
     } else if(left_distance >230){
         currentmode = 1;
-        current_log = "Switched to right Tof correction";
+        strcpy(current_log, "Switched to right ToF correction!");
         tof_error = ((maze_width/2)-(22.5) - right_distance);
         
     } else{
         currentmode = 2;
-        current_log = "Switched to left Tof correction";
+        strcpy(current_log, "Switched to left ToF correction");
         tof_error = left_distance - ((maze_width/2)-(22.5) );
         
     }
@@ -345,29 +343,33 @@ void tofPID() {
 }
 
 void readTOF(){
-  if(loxL.isRangeComplete() && loxR.isRangeComplete() && loxC.isRangeComplete()) {
-    uint16_t rawL = loxL.readRangeResult();
-        uint16_t rawR = loxR.readRangeResult();
-        uint16_t rawC = loxC.readRangeResult();
-        if(rawL>1000){
-            left_distance = 1000;
-        }else{
-            left_distance = constrain(updateKalman(kfLeft, rawL), 0, 1000);
-        }
-        if(rawR>1000){
-            right_distance = 1000;
-        } else{
-            right_distance = constrain(updateKalman(kfRight, rawR), 0, 1000);
-        }
-        if(rawC>1000){
-            center_distance = 1000;
-        } else {
-            center_distance = constrain(updateKalman(kfCenter, rawC), 0, 1000);
-        }
-
-        
+  if(loxL.isRangeComplete()) {
+        uint16_t rawL = loxL.readRangeResult();
         NewReading = true;
-} 
+        if(rawL < 2000)
+            left_distance = constrain(updateKalman(kfLeft, rawL), 0, 1000);
+        else
+            left_distance = 1000;
+    }
+
+    if(loxR.isRangeComplete()) {
+        uint16_t rawR = loxR.readRangeResult();
+        NewReading = true;
+        if(rawR < 2000)
+            right_distance = constrain(updateKalman(kfRight, rawR), 0, 1000);
+        else
+            right_distance = 1000;
+    }
+
+    if(loxC.isRangeComplete()) {
+        uint16_t rawC = loxC.readRangeResult();
+        NewReading = true;  
+        if(rawC < 2000)
+            center_distance = constrain(updateKalman(kfCenter, rawC), 0, 1000);
+        else
+            center_distance = 1000;
+    }
+
 }
 
 void loop() {}
@@ -384,17 +386,21 @@ void Turning_Logic(){
             turnInitialized  = true;
         }
         
-        if(turnDirectionRight && encCountR < turnStartEncR + Brake_Duration){
+        if(turnDirectionRight && micros() < TurnStartTime + Brake_Duration){
             digitalWrite(R1, HIGH); digitalWrite(R2, LOW);   
-
-        } else if(!turnDirectionRight && encCountL < turnStartEncL+Brake_Duration ){
+            ledcWrite(ledcChannelR, turn_speed);
+            ledcWrite(ledcChannelL, 0);
+            return;
+        } else if(!turnDirectionRight && micros() < TurnStartTime + Brake_Duration ){
             digitalWrite(L1, LOW);  digitalWrite(L2, HIGH);  
-
+            ledcWrite(ledcChannelL, turn_speed);
+            ledcWrite(ledcChannelR, 0);
+            return;
         }
 
 
-        int travelledL = encCountL - turnStartEncL - Brake_Duration;
-        int travelledR = encCountR - turnStartEncR - Brake_Duration;
+        int travelledL = encCountL - turnStartEncL;
+        int travelledR = encCountR - turnStartEncR;
         
         if(turnDirectionRight){
             digitalWrite(L1, HIGH); digitalWrite(L2, LOW);  
@@ -402,8 +408,9 @@ void Turning_Logic(){
             ledcWrite(ledcChannelR, 0);
             if(travelledL >= TURN_PULSES) {
                 turnInitialized = false;
-                current_log = "Turn Complete!";
-                current_log = micros() - TurnStartTime; 
+                last_tof_error = 0;
+                tof_error = 0;
+                snprintf(current_log, sizeof(current_log), "Turn Complete! Time: %lu", micros() - TurnStartTime);
                 robot_state = FOLLOW;
             }   
         }else {
@@ -411,9 +418,10 @@ void Turning_Logic(){
             ledcWrite(ledcChannelL, 0);
             ledcWrite(ledcChannelR, turn_speed);
             if(travelledR >= TURN_PULSES) {
-                current_log = "Turn Complete!";
+                snprintf(current_log, sizeof(current_log), "Turn Complete! Time: %lu", micros() - TurnStartTime);
+                last_tof_error = 0;
                 turnInitialized = false; 
-                current_log = micros() - TurnStartTime; 
+                tof_error = 0;
                 robot_state = FOLLOW;
             }  
         }
@@ -424,11 +432,11 @@ void Turning_Logic(){
 
 void taskSensorCore(void* pvParameters){
     setID();
-    // setupAP();
+    setupAP();
 
     for(;;) {
         readTOF();
-        // server.handleClient();
+        server.handleClient();
         vTaskDelay(pdMS_TO_TICKS(5));
       }
 }
@@ -440,17 +448,16 @@ void taskControlCore(void* pvParameters){
     const TickType_t xFrequency = pdMS_TO_TICKS(1000 / CONTROL_HZ);
     TickType_t xLastWakeTime = xTaskGetTickCount();
 
-    robot_state = FOLLOW;
+    robot_state = STOP;
     for(;;) {
       vTaskDelayUntil(&xLastWakeTime, xFrequency);
-      if(robot_state==FOLLOW && center_distance<turning_threshold && (left_distance > 200 || right_distance > 200)){
+      if(robot_state==FOLLOW && center_distance<((maze_width/2) + 42.5) && (left_distance > 200 || right_distance > 200)){
 
         robot_state = TURN;
-        current_log = "Switching to turn";
+        strcpy(current_log, "Switching to turn");
       }
       switch(robot_state){
         case FOLLOW:
-            baseSpeed=230;
             digitalWrite(L1, HIGH);
             digitalWrite(L2, LOW);
             digitalWrite(R1, LOW); 
@@ -472,8 +479,10 @@ void taskControlCore(void* pvParameters){
 void setup() {
     Serial.begin(115200);
     Wire.begin(sda, scl);
-    current_log = "RST C0:" + getResetReason(rtc_get_reset_reason(0)) +
-                  " C1:" + getResetReason(rtc_get_reset_reason(1));
+    snprintf(current_log, sizeof(current_log),
+         "RST C0:%s C1:%s",
+         getResetReason(rtc_get_reset_reason(0)),
+         getResetReason(rtc_get_reset_reason(1)));
 
     ledcSetup(ledcChannelL, freq, resolution);
     ledcSetup(ledcChannelR, freq, resolution);

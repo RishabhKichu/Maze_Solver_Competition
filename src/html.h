@@ -44,8 +44,8 @@ const char html[] PROGMEM = R"=====(
         </div>
         <div class="sect">
           <strong>ToF PID</strong>
-          <div class="row">P:<input type="number" name="tof_kp" step="0.01" value="0.8"></div>
-          <div class="row">D:<input type="number" name="tof_kd" step="0.01" value="4"></div>
+          <div class="row">P:<input type="number" name="tof_kp" step="0.01" value="0.2"></div>
+          <div class="row">D:<input type="number" name="tof_kd" step="0.01" value="1.5"></div>
           <div class="row">I:<input type="number" name="tof_ki" step="0.01" value="0.00"></div>
         </div>
         <div class="sect">
@@ -53,9 +53,9 @@ const char html[] PROGMEM = R"=====(
     <div class="row">Base Spd:<input type="number" name="base_speed" min="0" max="255" value="230"></div>
     <div class="row">Min Spd:<input type="number" name="min_speed" min="0" max="255" value="120"></div>
     <div class="row">Turn Spd:<input type="number" name="turn_speed" min="0" max="255" value="230"></div>
-    <div class="row">Turn Thresh:<input type="number" name="turning_threshold" step="1" value="100"></div>
-    <div class="row">Braking:<input type="number" name="braking_threshold" step="1" value="40"></div>
-    <div class="row">Turn Pulses:<input type="number" name="turn_pulses" step="1" value="800"></div>
+    <div class="row">Turn Thresh:<input type="number" name="turning_threshold" step="1" value="200"></div>
+    <div class="row">Braking:<input type="number" name="braking_threshold" step="1" value="20"></div>
+    <div class="row">Turn Pulses:<input type="number" name="turn_pulses" step="1" value="700"></div>
 </div>
         <input type="submit" class="btn" value="Update">
         <span id="msg" style="color:green; font-size:12px;"></span>
@@ -94,7 +94,7 @@ const char html[] PROGMEM = R"=====(
             if(d.length >= 10) {
                 document.getElementById('s_pwml').innerText = d[7];
                 document.getElementById('s_pwmr').innerText = d[8];
-                document.getElementByID('s_state').innerText = d[9];
+                document.getElementById('s_state').innerText = d[9];
             }
           }
         }).catch(()=>{});
