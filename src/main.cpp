@@ -36,17 +36,17 @@ float enc_kd = 0;
 float enc_ki = 0;
     
 float tof_kp = 0.2;
-float tof_kd = 4;
+float tof_kd = 3;
 float tof_ki = 0;
 
-int baseSpeed = 230;
+int baseSpeed = 120;
 float turning_threshold = 200;
 
 int turnStartEncL = 0;
 int turnStartEncR = 0;
 int turnStartDiff = 0;
 bool turnDirectionRight = false;
-int TURN_PULSES = 860;
+int TURN_PULSES = 800;
 int turnendEncL = 0;
 int turnendEncR = 0;
 int turn_buffer = 500;
@@ -54,7 +54,8 @@ int turn_buffer = 500;
 enum RobotState {
     STOP,
     FOLLOW,
-    TURN
+    TURN,
+    PRE_TURN,
 };
 
 RobotState robot_state;
@@ -110,6 +111,9 @@ const int ledcChannelL = 0;
 const int ledcChannelR = 1;
 const int resolution = 8;
 
+int pre_turn_encL = 0;
+int pre_turn_encR = 0;
+int encBuffer = 702;
 
 // Define unique I2C addresses for each sensor
 #define LOX1_ADDRESS 0x30
@@ -131,10 +135,10 @@ char current_log[64] = "Booting...";
 bool sensorsReady = false;
 bool NewReading = false;
 
-int min_speed = 120;
+int min_speed = 200;
 int turn_speed = 200;
 static bool turnInitialized = false;
-int maze_width = 250;
+int maze_width = 230;
 unsigned long TurnStartTime = 0;
 int Brake_Duration = 20000;
 
@@ -251,37 +255,37 @@ void setID(){
   digitalWrite(XSHUT_L, LOW);
   digitalWrite(XSHUT_R, LOW);
   digitalWrite(XSHUT_C, LOW);
-  delay(10);
+  delay(2000);
 
   pinMode(XSHUT_L, INPUT);
   delay(10);
 
-  if (!loxL.begin(LOX1_ADDRESS, true, &Wire, Adafruit_VL53L0X::VL53L0X_SENSE_HIGH_SPEED)) {
-    Serial.println("Failed to boot first VL53L0X");
+if (!loxL.begin(LOX1_ADDRESS, true, &Wire, Adafruit_VL53L0X::VL53L0X_SENSE_HIGH_SPEED)) {
+    Serial.println("Failed to boot left VL53L0X");
     while (1);
-  }else{
-    Serial.println("First VL53L0X initialized successfully");
-  }
-  delay(10);
+}else{
+    Serial.println("LEft VL53L0X initialized successfully");
+}
+delay(10);
 
-  pinMode(XSHUT_R, INPUT);
+  digitalWrite(XSHUT_R, HIGH);
   delay(10);
 
   if (!loxR.begin(LOX2_ADDRESS, true, &Wire, Adafruit_VL53L0X::VL53L0X_SENSE_HIGH_SPEED)) {
-    Serial.println("Failed to boot second VL53L0X");
+    Serial.println("Failed to boot right VL53L0X");
     while (1);
   } else {
-    Serial.println("Second VL53L0X initialized successfully");
+    Serial.println("right VL53L0X initialized successfully");
   }
 
-  pinMode(XSHUT_C, INPUT);  
+  digitalWrite(XSHUT_C, HIGH);
   delay(10);
 
   if (!loxC.begin(LOX3_ADDRESS, true, &Wire, Adafruit_VL53L0X::VL53L0X_SENSE_HIGH_SPEED)) {
-    Serial.println("Failed to boot second VL53L0X");
+    Serial.println("Failed to boot center VL53L0X");
     while (1);
   } else {
-    Serial.println("Third VL53L0X initialized successfully");
+    Serial.println("center VL53L0X initialized successfully");
   }
   loxL.startRangeContinuous();
   loxR.startRangeContinuous();
@@ -313,8 +317,7 @@ void tofPID() {
     portENTER_CRITICAL(&mux);
 
     left = left_distance;
-    right = right_distance;
-    center = center_distance;
+    right = right_distance; 
 
     portEXIT_CRITICAL(&mux);
     if(left < 230 && right < 230){
@@ -324,6 +327,7 @@ void tofPID() {
     } else if(left >230){
         currentmode = 1;
         tof_error = ((maze_width/2)-(22.5) - right);
+
         
     } else{
         currentmode = 2;
@@ -463,11 +467,14 @@ void taskControlCore(void* pvParameters){
     const TickType_t xFrequency = pdMS_TO_TICKS(1000 / CONTROL_HZ);
     TickType_t xLastWakeTime = xTaskGetTickCount();
 
-    robot_state = STOP;
+    robot_state = FOLLOW;
     for(;;) {
       vTaskDelayUntil(&xLastWakeTime, xFrequency);
-      if(robot_state==FOLLOW && center_distance<((maze_width/2) + 42.5) && (left_distance > 200 || right_distance > 200)){
-        if(turnendEncL && encCountL - turnendEncL > turn_buffer && turnendEncR && encCountR - turnendEncR > turn_buffer){
+      if(robot_state==FOLLOW && (left_distance > 200 || right_distance > 200) && center_distance < (maze_width/2) + 62.5){
+        
+        if( encCountL - turnendEncL > turn_buffer &&  encCountR - turnendEncR > turn_buffer){
+            pre_turn_encL = encCountL;
+            pre_turn_encR = encCountR;
             robot_state = TURN;
             strcpy(current_log, "Switching to turn");
         }
@@ -494,9 +501,10 @@ void taskControlCore(void* pvParameters){
 
 void setup() {
     Serial.begin(115200);
-    Wire.begin(sda, scl);
+    Wire.begin(sda, scl, 50000);
+    Wire.setTimeout(3000);
     snprintf(current_log, sizeof(current_log),
-         "RST C0:%s C1:%s",
+         "RST C0:%s C1:%Wire.s",
          getResetReason(rtc_get_reset_reason(0)),
          getResetReason(rtc_get_reset_reason(1)));
 
